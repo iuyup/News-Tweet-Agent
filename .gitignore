@@ -1,0 +1,38 @@
+# Python dependencies
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+venv/
+env/
+.venv/
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# Environment (PRIVATE)
+.env
+.env.local
+.env.development
+CLAUDE.md
+.claude/
+Claude Code 手册.md
+
+
+# Logs & Cache
+data/logs/*.jsonl
+data/cache/
+*.log
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Build
+dist/
+build/
+*.egg-info/
