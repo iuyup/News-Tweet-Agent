@@ -4,9 +4,18 @@
 
 ## 架构概览
 
-```
-START → SourceRouter → Collector → Analyst → ContentPlanner → Writer → Reviewer →(通过/超限)→ Publisher → END
-                                                              ↑←────(未通过，≤2次)──────────┘
+```mermaid
+flowchart LR
+    START(["▶ START"]) --> SR["SourceRouter"]
+    SR --> CO["Collector"]
+    CO --> AN["Analyst"]
+    AN -- "should_tweet=False" --> SKIP(["⏭ END"])
+    AN --> CP["ContentPlanner"]
+    CP --> WR["Writer"]
+    WR --> RV["Reviewer"]
+    RV -- "通过 / 超限" --> PB["Publisher"]
+    RV -- "未通过 ≤2次" --> WR
+    PB --> END(["⏹ END"])
 ```
 
 | 节点 | 职责 | LLM |
