@@ -3,15 +3,11 @@
 """
 import hashlib
 import logging
-from pathlib import Path
+from datetime import datetime
 
-from src.config import settings
 from src.models.news_item import Category, NewsItem
 
 logger = logging.getLogger(__name__)
-
-# 已发布内容的指纹缓存文件
-_CACHE_FILE = settings.cache_path / "published_hashes.txt"
 
 
 def _fingerprint(item: NewsItem) -> str:
@@ -21,16 +17,25 @@ def _fingerprint(item: NewsItem) -> str:
 
 
 def _load_published() -> set[str]:
-    if not _CACHE_FILE.exists():
-        return set()
-    return set(_CACHE_FILE.read_text(encoding="utf-8").splitlines())
+    from src.storage.db import load_published_fingerprints
+    return load_published_fingerprints()
 
 
 def mark_published(item: NewsItem) -> None:
-    """将条目指纹写入缓存，下次运行时跳过"""
-    settings.cache_path.mkdir(parents=True, exist_ok=True)
-    with _CACHE_FILE.open("a", encoding="utf-8") as f:
-        f.write(_fingerprint(item) + "\n")
+    """将条目指纹存入 SQLite，下次运行时跳过。
+    publisher.py 会用 save_tweet() 补全完整字段；此处写入最小记录保证去重生效。
+    """
+    from src.storage.db import save_tweet
+    save_tweet(
+        fingerprint=_fingerprint(item),
+        tweet_id=None,
+        tweet="",
+        news_title=item.title,
+        source=item.source,
+        category=item.category.value,
+        published_at=datetime.now().isoformat(),
+        is_published=True,
+    )
 
 
 def deduplicate(items: list[NewsItem]) -> list[NewsItem]:

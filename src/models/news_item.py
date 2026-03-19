@@ -16,6 +16,8 @@ class NewsItem(BaseModel):
     category: Category
     score: int = 0       # 热度分（reddit upvotes）
     fetched_at: datetime = None
+    subreddit: str | None = None   # Reddit 子版块名（如 "worldnews"）
+    username: str | None = None    # 作者用户名（来源平台相关）
 
     def model_post_init(self, __context):
         if self.fetched_at is None:

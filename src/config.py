@@ -45,13 +45,32 @@ class Settings(BaseSettings):
     http_timeout: float = 15.0
     http_user_agent: str = "Mozilla/5.0 (compatible; news-bot/1.0)"
 
+    # HackerNews
+    hackernews_limit: int = 20
+
+    # arXiv
+    arxiv_query: str = "cat:cs.AI OR cat:cs.LG OR cat:cs.CL"
+    arxiv_limit: int = 10
+
+    # RSS
+    rss_feeds: list[str] = [
+        "https://techcrunch.com/feed/",
+        "https://www.theverge.com/rss/index.xml",
+    ]
+    rss_limit_per_feed: int = 5
+
+    # 允许使用的信息源（可通过 .env 覆盖）
+    enabled_sources: list[str] = ["reddit", "hackernews", "arxiv", "rss"]
+
     # ── 推文生成规范 ──────────────────────────────────────────────────────
     tweet_max_length: int = 280
     tweets_per_run: int = 2
 
     # ── 调度 ──────────────────────────────────────────────────────────────
     schedule_interval_hours: int = 2
-    schedule_hours: str = "9"  # 多个执行时间点（逗号分隔），如 "9,11,13,15"
+    # pydantic-settings 从 .env 读取为 str，model_validator 负责转换为 list[int]
+    # 支持逗号分隔格式，如 SCHEDULE_HOURS=9,11,13,15
+    schedule_hours: str | list = Field(default="9")
     schedule_hour: int = 9  # 保留，向后兼容
     schedule_minute: int = 0
 
@@ -61,6 +80,8 @@ class Settings(BaseSettings):
             self.schedule_hours = [
                 int(h.strip()) for h in self.schedule_hours.split(",") if h.strip()
             ]
+        elif isinstance(self.schedule_hours, list):
+            self.schedule_hours = [int(h) for h in self.schedule_hours]
         return self
 
     # ── 路径 ──────────────────────────────────────────────────────────────
@@ -90,6 +111,9 @@ class Settings(BaseSettings):
             return None
         path = Path(self.sync_target_dir)
         return path if path.exists() else None
+
+    # ── Agent 模式 ─────────────────────────────────────────────────────────
+    use_agent: bool = False
 
     # ── 审核模式 ──────────────────────────────────────────────────────────
     dry_run: bool = False

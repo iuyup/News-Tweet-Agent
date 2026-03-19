@@ -1,201 +1,183 @@
-# News Tweet Bot
+# Auto-Tweet Agent
 
-自动化推文生成机器人，每日抓取时政与科技热点，由 LLM 撰写英文推文并发布到 Twitter/X。
+基于 **LangGraph** 的自主推文发布 Agent。每日多时段从 Reddit、HackerNews、arXiv、RSS 抓取热点，由 LLM 自主决策选题、撰写、审查，最终通过 Twitter/X API v2 自动发布英文推文。
 
-## 功能
+## 架构概览
 
-- **数据抓取**：从 Reddit 热帖（7 个目标 subreddit）、Nitter 热搜（7 个备用实例）获取热点
-- **内容过滤**：去重、分类（时政/科技）、质量筛选
-- **AI 生成**：调用 LLM（默认 DeepSeek）生成符合规范的英文推文（≤280字符，含 hashtag）
-- **自动发布**：通过 Twitter API v2 自动发布推文
-- **定时调度**：每日北京时间 9:00 自动执行（可配置多个时间点）
-- **Markdown 生成**：每日自动生成 Markdown 文件，支持增量更新
-- **Obsidian 同步**：支持同步到 Obsidian Vault
+```
+START → SourceRouter → Collector → Analyst → ContentPlanner → Writer → Reviewer →(通过/超限)→ Publisher → END
+                                                              ↑←────(未通过，≤2次)──────────┘
+```
+
+| 节点 | 职责 | LLM |
+|------|------|-----|
+| SourceRouter | 根据时间和账号定位动态选择信息源 | ✅ |
+| Collector | 并发抓取多源，合并去重 | — |
+| Analyst | 从原始新闻选出4-6条精华，决定是否发推（参考近7天历史去重） | ✅ |
+| ContentPlanner | 按分类制定发推计划（politics/tech各几条） | — |
+| Writer | 生成推文；修改模式下根据 Reviewer 反馈修改 | ✅ |
+| Reviewer | 5维评审（≥7.0通过），未通过回流 Writer，最多2次 | ✅ |
+| Publisher | 发布推文 + 写入 SQLite + 增量更新 Markdown + JSONL日志 | ✅（每日总结）|
 
 ## 技术栈
 
-- Python 3.10+ (async/await)
-- LLM: DeepSeek（默认）、Anthropic Claude、MiniMax
-- Twitter/X API v2 (tweepy OAuth 1.0a)
-- APScheduler
-- httpx / pydantic / beautifulsoup4
+- **语言**：Python 3.10+，全面 `async/await`
+- **Agent 框架**：LangGraph（StateGraph + MemorySaver checkpointing）
+- **LLM**：DeepSeek（默认）、Anthropic Claude、MiniMax
+- **信息源**：Reddit、HackerNews、arXiv、RSS（TechCrunch / The Verge）
+- **发布**：Twitter/X API v2（tweepy，OAuth 1.0a）
+- **持久化**：SQLite（推文历史 + 去重指纹）+ JSONL（运行日志）
+- **调度**：APScheduler（支持多时间点 cron）
+- **配置**：pydantic-settings + `.env`
 
 ## 快速开始
 
-### 1. 克隆项目
-
-```bash
-git clone <your-repo-url>
-cd news-tweet-bot
-```
-
-### 2. 安装依赖
+### 1. 安装依赖
 
 ```bash
 pip install -r requirements.txt
 ```
 
-### 3. 配置环境变量
+### 2. 配置 `.env`
 
-创建 `.env` 并填入密钥：
+```env
+# LLM（三选一或多选，默认 DeepSeek）
+DEEPSEEK_API_KEY=your_key
+ANTHROPIC_API_KEY=your_key
 
+# Twitter/X API v2（必填）
+TWITTER_API_KEY=your_key
+TWITTER_API_SECRET=your_key
+TWITTER_ACCESS_TOKEN=your_token
+TWITTER_ACCESS_SECRET=your_token_secret
+
+# 可选开关
+USE_AGENT=true           # 启用 LangGraph Agent（推荐）
+DRY_RUN=false            # true=不实际发推，用于测试
+DEFAULT_LLM_PROVIDER=deepseek
+SCHEDULE_HOURS=9,11,13,15,17,19,21,23   # 北京时间，每天执行时间点
+SYNC_TARGET_DIR=D:/Documents/ObsidianVault/News  # Obsidian 同步目录（可选）
 ```
-ANTHROPIC_API_KEY=your_anthropic_api_key
-TWITTER_API_KEY=your_twitter_api_key
-TWITTER_API_SECRET=your_twitter_api_secret
-TWITTER_ACCESS_TOKEN=your_twitter_access_token
-TWITTER_ACCESS_SECRET=your_twitter_access_secret
+
+### 3. 运行
+
+```bash
+# 手动执行一次（立即发布）
+python -m src.agent
+
+# 干跑测试（不实际发推）
+DRY_RUN=true python -m src.agent
+
+# 启动自动调度器（按 SCHEDULE_HOURS 定时执行，进程常驻）
+python -m src.scheduler.cron
+
+# 服务器后台运行
+nohup python -m src.scheduler.cron > data/logs/scheduler.log 2>&1 &
 ```
 
 ### 4. 运行测试
 
 ```bash
-# 运行所有测试
-pytest tests/ -v
-
-# 运行特定模块
-pytest tests/test_scrapers.py -v
-pytest tests/test_filters.py -v
+pytest tests/ -v        # 全部 63 个测试
 ```
 
-### 5. 手动运行工作流
+## 信息源
 
-```bash
-python -c "import asyncio; from src.scheduler.workflow import run_workflow; asyncio.run(run_workflow())"
-```
-
-### 6. 启动调度器
-
-```bash
-python -m src.scheduler.cron
-```
-
-## 工作流设计
-
-每日自动化流程（`scheduler/workflow.py`）：
-
-1. **抓取**：并发抓取 Reddit（7 个目标 subreddit）和 Nitter（7 备用实例）
-2. **去重 + 过滤**：去除已发布和批次内重复，过滤 UNKNOWN 分类，按热度排序
-3. **生成**：调用 LLM（默认 DeepSeek）按分类（POLITICS/TECH）生成英文推文
-4. **发布**：逐条发布推文，**每条推文发送成功后立即增量更新 Markdown**
-5. **总结**：LLM 生成每日新闻摘要，追加到 Markdown
-6. **日志**：写入 JSONL 日志（含 token 用量）
-
-## 抓取源
-
-### Reddit 目标子版
-
-| Subreddit | 分类 |
-|-----------|------|
-| r/worldnews | 时政 |
-| r/geopolitics | 时政 |
-| r/politics | 时政 |
-| r/technology | 科技 |
-| r/artificial | 科技 |
-| r/MachineLearning | 科技 |
-| r/singularity | 科技 |
-
-### Nitter 备用实例
-
-共 7 个备用实例轮询：
-- nitter.privacydev.net
-- nitter.poast.org
-- nitter.lucahammer.com
-- nitter.rawbit.ch
-- nitter.kyoko.jp
-- nitter.bus-hit.me
-- nitter.esmailelbob.xyz
-
-## 推文生成规范
-
-- 长度严格 ≤ 280 字符（含 hashtag）
-- 风格：简洁、客观、吸引眼球，适合英文受众
-- 每条推文附 2~3 个相关 hashtag
-- 时政类：中立客观，避免极端立场
-- 科技类：突出技术亮点或行业影响
+| 源 | 内容 | 认证 |
+|----|------|------|
+| Reddit | r/worldnews, r/geopolitics, r/politics, r/technology, r/artificial, r/MachineLearning, r/singularity | 无需 |
+| HackerNews | Firebase API Top Stories | 无需 |
+| arXiv | cs.AI / cs.LG / cs.CL 最新论文 | 无需 |
+| RSS | TechCrunch, The Verge | 无需 |
 
 ## 项目结构
 
 ```
 src/
-├── config.py           # 统一配置（pydantic-settings）
+├── config.py               # 统一配置（pydantic-settings）
 ├── models/
-│   └── news_item.py   # 数据模型（NewsItem, Category）
-├── scrapers/
-│   ├── nitter_scraper.py   # Nitter 热搜抓取
-│   └── reddit_scraper.py   # Reddit 热帖抓取
+│   └── news_item.py        # NewsItem, Category 数据模型
+├── agent/                  # LangGraph Agent（主流程）
+│   ├── __init__.py         # run_agent() 入口
+│   ├── state.py            # TweetAgentState TypedDict
+│   ├── graph.py            # StateGraph 组装
+│   ├── _llm_call.py        # 共享 LLM 调用工具
+│   └── nodes/              # 7 个节点实现
+│       ├── source_router.py
+│       ├── collector.py
+│       ├── analyst.py
+│       ├── content_planner.py
+│       ├── writer.py
+│       ├── reviewer.py
+│       └── publisher.py
+├── scrapers/               # 采集工具
+│   ├── reddit_scraper.py
+│   ├── hackernews_scraper.py
+│   ├── arxiv_scraper.py
+│   └── rss_scraper.py
 ├── processors/
-│   └── filter.py      # 内容过滤、去重、缓存标记
+│   └── filter.py           # 去重、过滤、分类
 ├── prompts/
-│   └── templates.py   # 推文生成 Prompt 模板
+│   └── templates.py        # 所有节点的 Prompt 模板
 ├── generator/
-│   └── llm.py         # LLM 推文生成（支持 Claude/DeepSeek/MiniMax）
+│   └── llm.py              # LLM 推文生成（旧 pipeline 复用）
 ├── publisher/
-│   └── twitter.py     # Twitter/X API 发布
-├── scheduler/
-│   ├── workflow.py    # 每日工作流核心
-│   └── cron.py        # APScheduler 定时调度
+│   └── twitter.py          # Twitter/X API 封装
 ├── storage/
-│   ├── daily_md.py    # Markdown 文件生成（增量更新）
-│   └── summarizer.py  # LLM 每日总结生成
+│   ├── db.py               # SQLite 持久化（推文历史 + 去重）
+│   ├── daily_md.py         # 每日 Markdown 增量更新
+│   └── summarizer.py       # LLM 每日总结生成
+├── scheduler/
+│   ├── workflow.py         # 旧 pipeline（保留，USE_AGENT=false 时使用）
+│   └── cron.py             # APScheduler 定时调度
 └── cli/
-    └── save_daily.py  # 手动重建 Markdown 工具
+    ├── status.py           # 状态监控面板
+    ├── backfill.py         # JSONL 历史数据回填到 SQLite
+    └── save_daily.py       # 手动重建 Markdown
 
-tests/                  # 单元测试
+tests/
 data/
-├── cache/             # 已发布新闻指纹缓存
-├── logs/              # 每日 JSONL 运行日志
-└── daily/             # 每日 Markdown 文件
+├── cache/tweet_history.db  # SQLite 发布历史
+├── logs/*.jsonl            # 每日运行日志
+└── daily/*.md              # 每日推文 Markdown
 ```
-
-## 配置选项
-
-在 `.env` 中可自定义：
-
-| 变量 | 默认值 | 说明 |
-|------|--------|------|
-| `DEFAULT_LLM_PROVIDER` | deepseek | LLM 提供商 (claude/minimax/deepseek) |
-| `DEEPSEEK_API_KEY` | (可选) | DeepSeek API 密钥 |
-| `DEEPSEEK_MODEL` | deepseek-chat | DeepSeek 模型 |
-| `ANTHROPIC_API_KEY` | (必填) | Anthropic API 密钥 |
-| `CLAUDE_MODEL` | claude-sonnet-4-6 | Claude 模型 |
-| `MINIMAX_API_KEY` | (可选) | MiniMax API 密钥 |
-| `MINIMAX_MODEL` | MiniMax-M2.5 | MiniMax 模型 |
-| `TWITTER_API_KEY` | (必填) | Twitter API Key |
-| `TWITTER_API_SECRET` | (必填) | Twitter API Secret |
-| `TWITTER_ACCESS_TOKEN` | (必填) | Twitter Access Token |
-| `TWITTER_ACCESS_SECRET` | (必填) | Twitter Access Secret |
-| `REDDIT_LIMIT_PER_SUB` | 10 | 每个 Reddit 子版抓取数量 |
-| `TWEETS_PER_RUN` | 2 | 每次运行生成推文数 |
-| `SCHEDULE_HOURS` | 9 | 调度时间（北京时间，可多个如 "9,11,13"） |
-| `SCHEDULE_MINUTE` | 0 | 调度时间（分钟） |
-| `DRY_RUN` | false | 测试模式（不实际发布） |
-| `NITTER_INSTANCES` | 7 个实例 | Nitter 备用实例列表 |
-| `SYNC_TARGET_DIR` | (可选) | Obsidian Vault 同步目录 |
 
 ## CLI 工具
 
-### 手动重建 Markdown
-
 ```bash
-# 从 JSONL 日志重建指定日期的 Markdown 文件
+# 状态监控（今日/累计发布数、token 统计、最近推文列表）
+python -m src.cli.status
+python -m src.cli.status --days 3
+
+# JSONL 历史数据回填到 SQLite（首次部署时运行一次）
+python -m src.cli.backfill
+python -m src.cli.backfill --dry   # 只统计，不写入
+
+# 从 JSONL 日志重建指定日期 Markdown
 python -m src.cli.save_daily 2026-03-14
-
-# 默认今天
-python -m src.cli.save_daily
 ```
 
-## 存储与日志
+## 配置参考
 
-- **JSONL 日志**：记录每条推文的完整信息（来源、token 用量、发布状态）
-- **Markdown 增量更新**：每条推文发布成功后立即更新当天文件
-- **缓存指纹**：已发布新闻标题 SHA1 指纹，防止重复发布
+| 变量 | 默认值 | 说明 |
+|------|--------|------|
+| `USE_AGENT` | false | true = LangGraph Agent，false = 旧 pipeline |
+| `DRY_RUN` | false | true = 不实际发推 |
+| `DEFAULT_LLM_PROVIDER` | deepseek | claude / minimax / deepseek |
+| `SCHEDULE_HOURS` | 9 | 北京时间执行时间点，逗号分隔（如 "9,11,13"） |
+| `TWEETS_PER_RUN` | 2 | 每次运行生成推文数 |
+| `ENABLED_SOURCES` | reddit,hackernews,arxiv,rss | SourceRouter 可选信息源 |
+| `HACKERNEWS_LIMIT` | 20 | HN 抓取条数 |
+| `ARXIV_QUERY` | cat:cs.AI OR cat:cs.LG OR cat:cs.CL | arXiv 搜索条件 |
+| `SYNC_TARGET_DIR` | (空) | Obsidian Vault 同步目录 |
 
-## 测试
+## 推文规范
 
-```bash
-pytest tests/ -v
-```
+- 严格 ≤ 280 字符（含 hashtag）
+- 每条附 2-3 个相关 hashtag
+- 时政类：客观呈现，不表达极端立场
+- 科技类：突出技术影响或行业意义
+- 结构化 JSON 输出，不做 regex 解析
 
 ## License
 

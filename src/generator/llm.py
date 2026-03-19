@@ -203,8 +203,10 @@ async def generate_tweets(
             by_category[item.category].append(item)
 
     for category, cat_items in by_category.items():
-        if not cat_items or len(results) >= count:
+        if len(results) >= count:
             break
+        if not cat_items:
+            continue
 
         # 每个分类取热度最高的 10 条给 Claude 选
         top_items = cat_items[:10]

@@ -11,6 +11,14 @@ from apscheduler.triggers.cron import CronTrigger
 from src.config import settings
 from src.scheduler.workflow import run_workflow
 
+async def _get_run_func():
+    """根据配置选择运行函数"""
+    if settings.use_agent:
+        from src.agent import run_agent
+        await run_agent()
+    else:
+        await run_workflow()
+
 logging.basicConfig(
     level=logging.INFO,
     format="%(asctime)s [%(levelname)s] %(name)s: %(message)s",
@@ -22,7 +30,7 @@ async def main() -> None:
     scheduler = AsyncIOScheduler()
     schedule_hours = ",".join(str(h) for h in settings.schedule_hours)
     scheduler.add_job(
-        run_workflow,
+        _get_run_func,
         trigger=CronTrigger(
             hour=schedule_hours,
             minute=settings.schedule_minute,

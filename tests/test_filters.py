@@ -90,25 +90,28 @@ class TestFilterAndRank:
 class TestMarkPublished:
     """标记已发布功能测试"""
 
-    def test_mark_published_creates_file(self, tmp_path, monkeypatch):
-        """测试标记后创建缓存文件"""
-        from src.config import settings
-        from src.processors import filter as filter_module
+    def test_mark_published_stores_in_db(self, tmp_path):
+        """测试标记后指纹写入 SQLite"""
+        from unittest.mock import patch, PropertyMock
+        import src.storage.db as db_module
 
-        # 临时修改缓存路径
-        monkeypatch.setattr(filter_module, "_CACHE_FILE", tmp_path / "test_hashes.txt")
+        db_file = tmp_path / "tweet_history.db"
 
-        item = NewsItem(
-            title="Test Title",
-            url="https://example.com",
-            source="test",
-            category=Category.TECH,
-            score=100,
-        )
+        with (
+            patch.object(db_module, "_DB_PATH", db_file),
+            patch("src.storage.db.settings") as mock_cfg,
+        ):
+            mock_cfg.cache_path = tmp_path
 
-        mark_published(item)
+            item = NewsItem(
+                title="Test Title for DB",
+                url="https://example.com",
+                source="test",
+                category=Category.TECH,
+                score=100,
+            )
 
-        cache_file = tmp_path / "test_hashes.txt"
-        assert cache_file.exists()
-        content = cache_file.read_text()
-        assert len(content) > 0
+            mark_published(item)
+            fps = db_module.load_published_fingerprints()
+
+        assert len(fps) > 0
