@@ -21,6 +21,7 @@ async def run_agent() -> dict:
     config = {"configurable": {"thread_id": run_id}}
 
     initial_state = {
+        # 必需字段
         "raw_items": [],
         "scrape_errors": [],
         "filtered_items": [],
@@ -28,6 +29,15 @@ async def run_agent() -> dict:
         "publish_results": [],
         "run_at": datetime.now(timezone.utc),
         "error_log": [],
+        # 可选字段：显式初始化，避免节点访问时 KeyError
+        "selected_sources": [],
+        "should_tweet": True,
+        "analysis_reasoning": "",
+        "content_plan": {},
+        "review_score": 0.0,
+        "review_feedback": "",
+        "review_passed": False,
+        "revision_count": 0,
     }
 
     logger.info("=== Agent 开始运行 (thread=%s) ===", run_id)

@@ -68,11 +68,17 @@ async def collector_node(state: dict) -> dict:
         valid_sources = ["reddit"]
 
     tasks = [_FETCHER_MAP[s]() for s in valid_sources]
-    results = await asyncio.gather(*tasks)
+    results = await asyncio.gather(*tasks, return_exceptions=True)
 
     all_items: list[NewsItem] = []
     all_errors: list[str] = []
-    for source, (items, errors) in zip(valid_sources, results):
+    for source, result in zip(valid_sources, results):
+        if isinstance(result, Exception):
+            err = f"{source} 抓取异常: {result}"
+            logger.error("Collector [%s]: %s", source, result)
+            all_errors.append(err)
+            continue
+        items, errors = result
         all_items.extend(items)
         all_errors.extend(errors)
         if items:

@@ -83,8 +83,13 @@ def _migrate_txt_to_db() -> None:
             conn.commit()
             logger.info("DB迁移: %d 条旧记录已导入 SQLite", len(new_rows))
 
-    old_path.rename(old_path.with_suffix(".txt.bak"))
-    logger.info("DB迁移: 旧缓存已备份为 published_hashes.txt.bak")
+    bak_path = old_path.with_suffix(".txt.bak")
+    if bak_path.exists():
+        old_path.unlink()
+        logger.info("DB迁移: .bak 已存在，直接删除旧缓存文件")
+    else:
+        old_path.rename(bak_path)
+        logger.info("DB迁移: 旧缓存已备份为 published_hashes.txt.bak")
 
 
 def load_published_fingerprints() -> set[str]:

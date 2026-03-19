@@ -46,13 +46,13 @@ async def reviewer_node(state: dict) -> dict:
         accuracy = float(data.get("accuracy", 0.0))
         fmt = float(data.get("format", 0.0))
     except Exception as e:
-        # LLM 失败时默认通过，避免死循环
-        logger.warning("Reviewer LLM 失败: %s，默认通过", e)
+        # LLM 失败视为未通过，revision_count +1；图的边界逻辑保证不死循环
+        logger.warning("Reviewer LLM 失败: %s，视为未通过", e)
         return {
-            "review_passed": True,
-            "review_score": 7.0,
-            "review_feedback": "",
-            "revision_count": revision_count,
+            "review_passed": False,
+            "review_score": 0.0,
+            "review_feedback": f"Reviewer error: {e}",
+            "revision_count": revision_count + 1,
         }
 
     # 未通过时计数 +1

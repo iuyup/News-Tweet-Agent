@@ -56,7 +56,7 @@ def _after_review(state: TweetAgentState) -> str:
     if state.get("review_passed"):
         return "publisher"
     revision_count = state.get("revision_count", 0)
-    if revision_count > MAX_REVISIONS:
+    if revision_count >= MAX_REVISIONS:
         logger.info("Graph: 达到最大修改次数 %d，强制发布", revision_count)
         return "publisher"
     logger.info("Graph: 评审未通过，第 %d 次修改", revision_count)

@@ -277,14 +277,15 @@ class TestReviewerNode:
         assert "Hook" in result["review_feedback"]
 
     @pytest.mark.asyncio
-    async def test_reviewer_llm_failure_defaults_pass(self):
-        """LLM 失败时默认通过，避免死循环"""
+    async def test_reviewer_llm_failure_increments_count(self):
+        """LLM 失败视为未通过，revision_count +1，由图边界逻辑保证终止"""
         tweets = _make_tweets(_make_items())
         with patch("src.agent.nodes.reviewer.call_default_llm", new_callable=AsyncMock, side_effect=Exception("err")):
             from src.agent.nodes.reviewer import reviewer_node
             result = await reviewer_node({"generated_tweets": tweets, "revision_count": 0})
 
-        assert result["review_passed"] is True
+        assert result["review_passed"] is False
+        assert result["revision_count"] == 1
 
     @pytest.mark.asyncio
     async def test_reviewer_no_tweets(self):
@@ -425,8 +426,8 @@ class TestGraphIntegration:
             app = build_checkpointed_graph()
             result = await app.ainvoke(_initial_state(), config=_run_config())
 
-        # 最终 revision_count 应超过 MAX_REVISIONS，仍能发布
-        assert result.get("revision_count", 0) > MAX_REVISIONS
+        # 最终 revision_count 应 >= MAX_REVISIONS，仍能发布
+        assert result.get("revision_count", 0) >= MAX_REVISIONS
         assert len(result["publish_results"]) > 0
 
     @pytest.mark.asyncio
